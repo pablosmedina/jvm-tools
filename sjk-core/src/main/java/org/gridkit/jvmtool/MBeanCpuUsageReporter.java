@@ -159,7 +159,7 @@ public class MBeanCpuUsageReporter {
 				double userT = ((double)(newNote.lastUserTime - lastNote.lastUserTime)) / timeSplit;
 				double allocRate = ((double)(newNote.lastAllocatedBytes - lastNote.lastAllocatedBytes)) * TimeUnit.SECONDS.toNanos(1) / timeSplit;
 
-				table.add(new ThreadLine(tid, 100 * userT, 100 * (cpuT - userT), allocRate, getThreadName(tid)));
+				table.add(new ThreadLine(tid, 100 * userT, 100 * (cpuT - userT), allocRate, getThreadName(tid), getThreadState(tid), getThreadStackTrace(tid)));
 			}
 		}
 		
@@ -201,10 +201,10 @@ public class MBeanCpuUsageReporter {
 
 	private Object format(ThreadLine line) {
 		if (threadAllocatedMemoryEnabled) {
-			return String.format("[%06d] user=%5.2f%% sys=%5.2f%% alloc=%6sb/s - %s", line.id, line.userT, (line.sysT), Formats.toMemorySize((long)line.allocRate), line.name);
+			return String.format("[%06d] user=%5.2f%% sys=%5.2f%% alloc=%6sb/s - %s - %s", line.id, line.userT, (line.sysT), Formats.toMemorySize((long)line.allocRate), line.name,  line.stackTrace);
 		}
 		else {
-			return String.format("[%06d] user=%5.2f%% sys=%5.2f%% - %s", line.id, line.userT, (line.sysT), line.name);
+			return String.format("[%06d] user=%5.2f%% sys=%5.2f%% - %s - %s", line.id, line.userT, (line.sysT), line.name, line.stackTrace);
 		}
 	}
 
@@ -225,6 +225,25 @@ public class MBeanCpuUsageReporter {
 		try {
 			CompositeData info = threadDump.get(tid);
 			return (String) info.get("threadName");
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
+	private String getThreadState(long tid) {
+		try {
+			CompositeData info = threadDump.get(tid);
+			return (String) info.get("threadState");
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
+	private String getThreadStackTrace(long tid) {
+		try {
+			CompositeData info = threadDump.get(tid);
+			Object st = info.get("stackTrace");
+			return st.toString();
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
@@ -293,17 +312,21 @@ public class MBeanCpuUsageReporter {
 		double sysT;
 		double allocRate;
 		String name;
+		String state;
+		String stackTrace;
 		
-		public ThreadLine(long id, double userT, double sysT, double allocRate, String name) {
+		public ThreadLine(long id, double userT, double sysT, double allocRate, String name, String state, String stackTrace) {
 			this.id = id;
 			this.userT = userT;
 			this.sysT = sysT;
 			this.allocRate = allocRate;
+			this.state = state;
 			this.name = name;
+			this.stackTrace = stackTrace;
 		}
 
 		public String toString() {
-			return String.format("[%06d] user=%5.2f%% sys=%5.2f%% - %s", id, userT, (sysT), name);
+			return String.format("[%06d] user=%5.2f%% sys=%5.2f%% - %s - %s hola", id, userT, (sysT), name, state);
 		}		
 	}
 	
