@@ -69,12 +69,14 @@ public class ProfilerCmd implements CmdRef {
 				System.out.println("Profiling ...");
 				while(true) {
 					while(System.currentTimeMillis() < deadline) {
+						tmon.dumpThreads();
 						Thread.sleep(samplerIntervalMS);
 					}
 					deadline += reportIntervalMS;
-					System.out.println();
-					System.out.println(tmon.report());
-					System.out.println();
+					tmon.report();
+//					System.out.println();
+//					System.out.println(tmon.report());
+//					System.out.println();
 					if (System.in.available() > 0) {
 						return;
 					}
