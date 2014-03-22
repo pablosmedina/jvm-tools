@@ -2,10 +2,13 @@ package org.gridkit.jvmtool.cmd;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
 
 import javax.management.MBeanServerConnection;
 
+import org.gridkit.jvmtool.CPUSampler;
 import org.gridkit.jvmtool.GlobHelper;
 import org.gridkit.jvmtool.JmxConnectionInfo;
 import org.gridkit.jvmtool.MBeanCpuUsageReporter;
@@ -42,8 +45,14 @@ public class ProfilerCmd implements CmdRef {
 		@Parameter(names = {"-si", "--sampler-interval"}, converter = TimeIntervalConverter.class, description = "Interval between polling MBeans")
 		private long samplerIntervalMS = 50;
 		
-		@Parameter(names = {"-f", "--filter"}, description = "Wild card expression to filter thread by name")
+		@Parameter(names = {"-tf", "--thread-filter"}, description = "Wild card expression to filter thread by name")
 		private String threadFilter;
+		
+		@Parameter(names = {"-pf", "--package-filter"}, description = "Wild card expression to filter package by name")
+		private String packageFilter;
+		
+		@Parameter(names = {"-tm", "--top-methods"}, description = "# top methods")
+		private int topMethods = 10;
 		
 		@ParametersDelegate
 		private JmxConnectionInfo connInfo = new JmxConnectionInfo();
@@ -57,26 +66,31 @@ public class ProfilerCmd implements CmdRef {
 			try {
 				MBeanServerConnection mserver = connInfo.getMServer();
 				
-				final MBeanProfilerReporter tmon = new MBeanProfilerReporter(mserver);
+				final CPUSampler sampler = new CPUSampler(mserver, threadFilter, packageFilter, samplerIntervalMS, topMethods);
 				
+				System.out.println("Sampling...");
 				
-				if (threadFilter != null) {
-					tmon.setThreadFilter(GlobHelper.translate(threadFilter, "\0"));
-				}
-				
-				long deadline = System.currentTimeMillis() + Math.min(reportIntervalMS, 10 * samplerIntervalMS);
-				tmon.report();
-				System.out.println("Profiling ...");
-				while(true) {
-					while(System.currentTimeMillis() < deadline) {
-						tmon.dumpThreads();
-						Thread.sleep(samplerIntervalMS);
+				Timer sampling = new Timer();
+				sampling.scheduleAtFixedRate(new TimerTask() {
+					@Override
+					public void run() {
+						try {
+							sampler.sample();
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
 					}
-					deadline += reportIntervalMS;
-					tmon.report();
-//					System.out.println();
-//					System.out.println(tmon.report());
-//					System.out.println();
+				}, 0, samplerIntervalMS);
+				
+				Timer reporting = new Timer();
+				reporting.scheduleAtFixedRate(new TimerTask() {
+					@Override
+					public void run() {
+						System.out.println(sampler.reportFromFast());
+					}
+				}, reportIntervalMS, reportIntervalMS);
+				
+				while(true) {
 					if (System.in.available() > 0) {
 						return;
 					}

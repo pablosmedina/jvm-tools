@@ -6,15 +6,14 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.management.ThreadInfo;
 import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import javax.management.MBeanServerConnection;
@@ -22,15 +21,16 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.management.openmbean.CompositeData;
 
+
 public class MBeanProfilerReporter {
 
 	private final MBeanServerConnection mserver;
 	private Pattern filter;
 	private static final ObjectName THREADING_MBEAN = name("java.lang:type=Threading");
 	private Map<Long, ThreadInfo> threadDump = new HashMap<Long, ThreadInfo>();
-	private long samples;
-	private Map<StackTraceElement[], Long> stackTracesMap = new HashMap<StackTraceElement[], Long>();
+	private long samples =1;
 	
+	private Map<StackTraceElement[], Long> stackTracesMap = new HashMap<StackTraceElement[], Long>();
 	
 	public MBeanProfilerReporter(MBeanServerConnection mserver) {
 		this.mserver = mserver;
@@ -41,15 +41,57 @@ public class MBeanProfilerReporter {
 	}
 
 	public String report() {
-		dumpThreads();
-		try {
-			writeGoogleProfileFormat();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		return ""+samples;
+		sample();
+//		topMethods();
+//		try {
+//			writeGoogleProfileFormat();
+//		} catch (IOException e) {
+//			e.printStackTrace();
+//		}
+		return topMethods();
 	}
 	
+	private String topMethods() {
+		Map<StackTraceElement,MethodCount> methods = new HashMap<StackTraceElement,MethodCount>();
+		
+		BigDecimal samplesBigDecimal = new BigDecimal(samples);
+		
+		for(Entry<StackTraceElement[], Long> stackTraceEntry : stackTracesMap.entrySet()) {
+			StackTraceElement[] stackTrace = stackTraceEntry.getKey();
+			long count = stackTraceEntry.getValue();
+			
+			if (stackTrace.length > 0) {
+				StackTraceElement element = stackTrace[0];
+				MethodCount methodCount = methods.get(element);
+				if (methodCount == null) {
+					methodCount = new MethodCount(samples);
+					methodCount.element = element;
+					methodCount.count = 0;
+				}
+				methodCount.count = methodCount.count + Long.valueOf(count).intValue();
+				methods.put(element, methodCount);
+			}
+			
+//			for(StackTraceElement element : stackTrace) {
+//				MethodCount methodCount = methods.get(element);
+//				if (methodCount == null) {
+//					methodCount = new MethodCount(samples);
+//					methodCount.element = element;
+//					methodCount.count = 0;
+//				}
+//				methodCount.count = methodCount.count + Long.valueOf(count).intValue();
+//				methods.put(element, methodCount);
+//			}
+		}
+		List<MethodCount> methodList = new ArrayList<MethodCount>(methods.values());
+		Collections.sort(methodList);
+		
+//		StringBuilder builder = new StringBuilder();
+//		builder.append(methodList.get(0)).append("\n").append(methodList.get(1)).append("\n").append(methodList.get(2)).append("\n");
+		return methodList.toString();
+		
+	}
+
 //	private String output() {
 //		Map<StackTraceElement,Integer> uniq = new HashMap<StackTraceElement,Integer>();
 //		BigDecimal samplesBigDecimal = new BigDecimal(samples);
@@ -138,19 +180,17 @@ public class MBeanProfilerReporter {
 		}
 	}
 	
-	public void dumpThreads() {
+	public void sample() {
 		try {
 			ObjectName bean = THREADING_MBEAN;
 //			long start = System.currentTimeMillis();
 			CompositeData[] ti = (CompositeData[]) mserver.invoke(bean, "dumpAllThreads", new Object[]{Boolean.FALSE, Boolean.FALSE}, new String[]{"boolean", "boolean"});
 //			System.out.println("threaddump took "+(System.currentTimeMillis() - start)+" ms");
+			boolean wereRunningThread = false;
 			threadDump.clear();
 			for(CompositeData t:ti) {
 				threadDump.put((Long) t.get("threadId"), ThreadInfo.from(t));
 			}
-			
-			
-			samples++;
 			StringBuilder builder = new StringBuilder();
 			for(Entry<Long, ThreadInfo> entry: threadDump.entrySet()) {
 				ThreadInfo thread = entry.getValue();
@@ -167,6 +207,7 @@ public class MBeanProfilerReporter {
 //				builder.append("]\n");
 				if (thread.getStackTrace().length > 0 && thread.getThreadState().equals(Thread.State.RUNNABLE)
 						&& thread.getThreadName().indexOf("RMI") < 0) {
+					wereRunningThread = true;
 					Long count = stackTracesMap.get(thread.getStackTrace());
 					if (count == null) {
 						count = 0l;
@@ -174,6 +215,9 @@ public class MBeanProfilerReporter {
 					count++;
 					stackTracesMap.put(thread.getStackTrace(), count);
 				}
+			}
+			if (wereRunningThread) {
+				samples++;
 			}
 			
 			
